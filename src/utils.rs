@@ -5,14 +5,14 @@ use clap::{Parser, Subcommand, ValueEnum};
 use rayon::prelude::*;
 
 #[derive(ValueEnum, Debug, Clone)]
-enum QuantizationMode {
+pub enum QuantizationMode {
     /// The default quantization includes all 2d tensors, except the output tensor which always
     /// uses Q6_K.
     Llama,
 }
 
 impl QuantizationMode {
-    fn quantize(&self, name: &str, tensor: QTensor, dtype: GgmlDType) -> Result<QTensor> {
+    pub fn quantize(&self, name: &str, tensor: QTensor, dtype: GgmlDType) -> Result<QTensor> {
         match self {
             Self::Llama => {
                 // Same behavior as the llama.cpp quantization.
@@ -33,7 +33,7 @@ impl QuantizationMode {
 }
 
 #[derive(ValueEnum, Debug, Clone)]
-enum Quantization {
+pub enum Quantization {
     #[value(name = "q4_0")]
     Q4_0,
     #[value(name = "q4_1")]
@@ -78,7 +78,7 @@ impl Quantization {
 }
 
 #[derive(ValueEnum, Debug, Clone)]
-enum Format {
+pub enum Format {
     Safetensors,
     Npz,
     Ggml,
@@ -88,7 +88,7 @@ enum Format {
 }
 
 impl Format {
-    fn infer<P: AsRef<std::path::Path>>(p: P) -> Option<Self> {
+    pub fn infer<P: AsRef<std::path::Path>>(p: P) -> Option<Self> {
         p.as_ref()
          .extension()
          .and_then(|e| e.to_str())
@@ -105,7 +105,7 @@ impl Format {
 }
 
 #[derive(Subcommand, Debug, Clone)]
-enum Command {
+pub enum Command {
     Ls {
         files: Vec<std::path::PathBuf>,
 
@@ -146,109 +146,11 @@ enum Command {
 }
 
 #[derive(Parser, Debug, Clone)]
-struct Args {
+pub struct Args {
     #[command(subcommand)]
-    command: Command,
+    pub command: Command,
 }
 
-fn run_ls(
-    file: &std::path::PathBuf,
-    format: Option<Format>,
-    verbose: bool,
-    device: &Device,
-) -> Result<()> {
-    let format = match format {
-        Some(format) => format,
-        None => match Format::infer(file) {
-            Some(format) => format,
-            None => {
-                println!(
-                    "{file:?}: cannot infer format from file extension, use the --format flag"
-                );
-                return Ok(());
-            }
-        },
-    };
-    match format {
-        Format::Npz => {
-            let tensors = candle_core::npy::NpzTensors::new(file)?;
-            let mut names = tensors.names();
-            names.sort();
-            for name in names {
-                let shape_dtype = match tensors.get_shape_and_dtype(name) {
-                    Ok((shape, dtype)) => format!("[{shape:?}; {dtype:?}]"),
-                    Err(err) => err.to_string(),
-                };
-                println!("{name}: {shape_dtype}")
-            }
-        }
-        Format::Safetensors => {
-            let tensors = unsafe { candle_core::safetensors::MmapedSafetensors::new(file)? };
-            let mut tensors = tensors.tensors();
-            tensors.sort_by(|a, b| a.0.cmp(&b.0));
-            for (name, view) in tensors.iter() {
-                let dtype = view.dtype();
-                let dtype = match candle_core::DType::try_from(dtype) {
-                    Ok(dtype) => format!("{dtype:?}"),
-                    Err(_) => format!("{dtype:?}"),
-                };
-                let shape = view.shape();
-                println!("{name}: [{shape:?}; {dtype}]")
-            }
-        }
-        Format::Pth => {
-            let mut tensors = candle_core::pickle::read_pth_tensor_info(file, verbose, None)?;
-            tensors.sort_by(|a, b| a.name.cmp(&b.name));
-            for tensor_info in tensors.iter() {
-                println!(
-                    "{}: [{:?}; {:?}]",
-                    tensor_info.name,
-                    tensor_info.layout.shape(),
-                    tensor_info.dtype,
-                );
-                if verbose {
-                    println!("    {:?}", tensor_info);
-                }
-            }
-        }
-        Format::Pickle => {
-            let file = std::fs::File::open(file)?;
-            let mut reader = std::io::BufReader::new(file);
-            let mut stack = candle_core::pickle::Stack::empty();
-            stack.read_loop(&mut reader)?;
-            for (i, obj) in stack.stack().iter().enumerate() {
-                println!("{i} {obj:?}");
-            }
-        }
-        Format::Ggml => {
-            let mut file = std::fs::File::open(file)?;
-            let content = candle_core::quantized::ggml_file::Content::read(&mut file, device)?;
-            let mut tensors = content.tensors.into_iter().collect::<Vec<_>>();
-            tensors.sort_by(|a, b| a.0.cmp(&b.0));
-            for (name, qtensor) in tensors.iter() {
-                println!("{name}: [{:?}; {:?}]", qtensor.shape(), qtensor.dtype());
-            }
-        }
-        Format::Gguf => {
-            let mut file = std::fs::File::open(file)?;
-            let content = gguf_file::Content::read(&mut file)?;
-            if verbose {
-                let mut metadata = content.metadata.into_iter().collect::<Vec<_>>();
-                metadata.sort_by(|a, b| a.0.cmp(&b.0));
-                println!("metadata entries ({})", metadata.len());
-                for (key, value) in metadata.iter() {
-                    println!("  {key}: {value:?}");
-                }
-            }
-            let mut tensors = content.tensor_infos.into_iter().collect::<Vec<_>>();
-            tensors.sort_by(|a, b| a.0.cmp(&b.0));
-            for (name, info) in tensors.iter() {
-                println!("{name}: [{:?}; {:?}]", info.shape, info.ggml_dtype);
-            }
-        }
-    }
-    Ok(())
-}
 
 fn run_quantize_safetensors(
     in_files: &[std::path::PathBuf],
@@ -304,7 +206,7 @@ fn run_dequantize(
     Ok(())
 }
 
-fn run_quantize(
+pub fn safetensors_to_gguf(
     in_files: &[std::path::PathBuf],
     out_file: std::path::PathBuf,
     q: Quantization,
@@ -390,7 +292,23 @@ fn run_quantize(
 //     Ok(())
 // }
 
+pub fn get_files_with_extension(dir: &std::path::Path, extension: &str) -> Vec<std::path::PathBuf> {
+    let mut result = Vec::new();
 
-pub fn safetensors_to_gguf(){
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries {
+            if let Ok(entry) = entry {
+                let path = entry.path();
+                if path.is_file() {
+                    if let Some(ext) = path.extension() {
+                        if ext == extension {
+                            result.push(path);
+                        }
+                    }
+                }
+            }
+        }
+    }
 
+    result
 }

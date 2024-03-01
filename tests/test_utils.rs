@@ -6,7 +6,8 @@ use tempfile::tempdir;
 use candle_core::Device;
 use anyhow::Result;
 
-use solar_rs::utils::{safetensors_to_gguf, get_files_with_extension, QuantizationMode, Quantization};
+use solar_rs::utils::{safetensors_to_gguf, get_files_with_extension, display_tensors, QuantizationMode,
+                      Format, Quantization};
 
 #[test]
 fn test_get_files_with_extension() {
@@ -38,11 +39,21 @@ fn test_get_files_with_extension() {
 }
 
 #[test]
+#[ignore]
 #[cfg(not(feature = "exclude_from_ci"))]
-fn test_run_quntize()->Result<()>{
+fn test_safetensors_to_gguf()->Result<()>{
     let resource_path = Path::new("resources/DataVortexS-10.7B-dpo-v1.6");
     let in_files = get_files_with_extension(resource_path, "safetensors");
-    let out_file=Path::new("../resources/solar-datavortexs-10.7b-dpo-v1.6-quantized-q4_0.gguf");
-    safetensors_to_gguf(&in_files, out_file.to_path_buf(), Quantization::Q4_0, QuantizationMode::Llama, &Device::Cpu)?;
+    let out_file=resource_path.join("solar-datavortexs-10.7b-dpo-v1.6-quantized-q4_0.gguf");
+    safetensors_to_gguf(&in_files, out_file.to_path_buf(), Quantization::Q4_0)?;
+    Ok(())
+}
+
+#[test]
+#[cfg(not(feature = "exclude_from_ci"))]
+fn test_display_tensors()->Result<()>{
+    let resource_path = Path::new("resources/DataVortexS-10.7B-dpo-v1.6/solar-datavortexs-10.7b-dpo-v1.6-quantized-q4_1\
+    .gguf");
+    display_tensors(&resource_path.to_path_buf(), Option::from(Format::Gguf), true, &Device::Cpu);
     Ok(())
 }

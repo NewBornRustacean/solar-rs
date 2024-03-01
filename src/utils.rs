@@ -1,7 +1,7 @@
 
 use candle_core::quantized::{gguf_file, GgmlDType, QTensor};
 use candle_core::{Device, Result};
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::ValueEnum;
 use rayon::prelude::*;
 
 #[derive(ValueEnum, Debug, Clone)]
@@ -104,55 +104,107 @@ impl Format {
     }
 }
 
-#[derive(Subcommand, Debug, Clone)]
-pub enum Command {
-    Ls {
-        files: Vec<std::path::PathBuf>,
+pub fn display_tensors(
+    file: &std::path::PathBuf,
+    format: Option<Format>,
+    verbose: bool,
+    device: &Device,
+) -> Result<()> {
+    let format = match format {
+        Some(format) => format,
+        None => match Format::infer(file) {
+            Some(format) => format,
+            None => {
+                println!(
+                    "{file:?}: cannot infer format from file extension, use the --format flag"
+                );
+                return Ok(());
+            }
+        },
+    };
+    match format {
+        Format::Npz => {
+            let tensors = candle_core::npy::NpzTensors::new(file)?;
+            let mut names = tensors.names();
+            names.sort();
+            for name in names {
+                let shape_dtype = match tensors.get_shape_and_dtype(name) {
+                    Ok((shape, dtype)) => format!("[{shape:?}; {dtype:?}]"),
+                    Err(err) => err.to_string(),
+                };
+                println!("{name}: {shape_dtype}")
+            }
+        }
+        Format::Safetensors => {
+            let tensors = unsafe { candle_core::safetensors::MmapedSafetensors::new(file)? };
+            let mut tensors = tensors.tensors();
+            tensors.sort_by(|a, b| a.0.cmp(&b.0));
+            for (name, view) in tensors.iter() {
+                let dtype = view.dtype();
+                let dtype = match candle_core::DType::try_from(dtype) {
+                    Ok(dtype) => format!("{dtype:?}"),
+                    Err(_) => format!("{dtype:?}"),
+                };
+                let shape = view.shape();
+                println!("{name}: [{shape:?}; {dtype}]")
+            }
+        }
+        Format::Pth => {
+            let mut tensors = candle_core::pickle::read_pth_tensor_info(file, verbose)?;
+            tensors.sort_by(|a, b| a.name.cmp(&b.name));
+            for tensor_info in tensors.iter() {
+                println!(
+                    "{}: [{:?}; {:?}]",
+                    tensor_info.name,
+                    tensor_info.layout.shape(),
+                    tensor_info.dtype,
+                );
+                if verbose {
+                    println!("    {:?}", tensor_info);
+                }
+            }
+        }
 
-        /// The file format to use, if unspecified infer from the file extension.
-        #[arg(long, value_enum)]
-        format: Option<Format>,
-
-        /// Enable verbose mode.
-        #[arg(short, long)]
-        verbose: bool,
-    },
-
-    Quantize {
-        /// The input file(s), in safetensors format.
-        in_file: Vec<std::path::PathBuf>,
-
-        /// The output file, in gguf format.
-        #[arg(long)]
-        out_file: std::path::PathBuf,
-
-        /// The quantization schema to apply.
-        #[arg(long, value_enum)]
-        quantization: Quantization,
-
-        /// Which tensor to quantize.
-        #[arg(long, value_enum, default_value_t = QuantizationMode::Llama)]
-        mode: QuantizationMode,
-    },
-
-    Dequantize {
-        /// The input file, in gguf format.
-        in_file: std::path::PathBuf,
-
-        /// The output file, in safetensors format.
-        #[arg(long)]
-        out_file: std::path::PathBuf,
-    },
+        Format::Pickle => {
+            let file = std::fs::File::open(file)?;
+            let mut reader = std::io::BufReader::new(file);
+            let mut stack = candle_core::pickle::Stack::empty();
+            stack.read_loop(&mut reader)?;
+            for (i, obj) in stack.stack().iter().enumerate() {
+                println!("{i} {obj:?}");
+            }
+        }
+        Format::Ggml => {
+            let mut file = std::fs::File::open(file)?;
+            let content = candle_core::quantized::ggml_file::Content::read(&mut file, device)?;
+            let mut tensors = content.tensors.into_iter().collect::<Vec<_>>();
+            tensors.sort_by(|a, b| a.0.cmp(&b.0));
+            for (name, qtensor) in tensors.iter() {
+                println!("{name}: [{:?}; {:?}]", qtensor.shape(), qtensor.dtype());
+            }
+        }
+        Format::Gguf => {
+            let mut file = std::fs::File::open(file)?;
+            let content = gguf_file::Content::read(&mut file)?;
+            if verbose {
+                let mut metadata = content.metadata.into_iter().collect::<Vec<_>>();
+                metadata.sort_by(|a, b| a.0.cmp(&b.0));
+                println!("metadata entries ({})", metadata.len());
+                for (key, value) in metadata.iter() {
+                    println!("  {key}: {value:?}");
+                }
+            }
+            let mut tensors = content.tensor_infos.into_iter().collect::<Vec<_>>();
+            tensors.sort_by(|a, b| a.0.cmp(&b.0));
+            for (name, info) in tensors.iter() {
+                println!("{name}: [{:?}; {:?}]", info.shape, info.ggml_dtype);
+            }
+        }
+    }
+    Ok(())
 }
 
-#[derive(Parser, Debug, Clone)]
-pub struct Args {
-    #[command(subcommand)]
-    pub command: Command,
-}
-
-
-fn run_quantize_safetensors(
+pub fn safetensors_to_gguf(
     in_files: &[std::path::PathBuf],
     out_file: std::path::PathBuf,
     q: Quantization,
@@ -185,7 +237,9 @@ fn run_quantize_safetensors(
         .iter()
         .map(|(k, v)| (k.as_str(), v))
         .collect::<Vec<_>>();
+
     gguf_file::write(&mut out_file, &[], &qtensors)?;
+
     Ok(())
 }
 
@@ -206,91 +260,6 @@ fn run_dequantize(
     Ok(())
 }
 
-pub fn safetensors_to_gguf(
-    in_files: &[std::path::PathBuf],
-    out_file: std::path::PathBuf,
-    q: Quantization,
-    qmode: QuantizationMode,
-    device: &Device,
-) -> Result<()> {
-    if in_files.is_empty() {
-        candle_core::bail!("no specified input files")
-    }
-    if let Some(extension) = out_file.extension() {
-        if extension == "safetensors" {
-            candle_core::bail!("the generated file cannot use the safetensors extension")
-        }
-    }
-    if let Some(extension) = in_files[0].extension() {
-        if extension == "safetensors" {
-            return run_quantize_safetensors(in_files, out_file, q);
-        }
-    }
-
-    if in_files.len() != 1 {
-        candle_core::bail!("only a single in-file can be used when quantizing gguf files")
-    }
-
-    // Open the out file early so as to fail directly on missing directories etc.
-    let mut out_file = std::fs::File::create(out_file)?;
-    let mut in_ = std::fs::File::open(&in_files[0])?;
-    let content = gguf_file::Content::read(&mut in_)?;
-    println!("tensors: {}", content.tensor_infos.len());
-
-    let dtype = q.dtype();
-    let qtensors = content
-        .tensor_infos
-        .par_iter()
-        .map(|(name, _)| {
-            println!("  quantizing {name}");
-            let mut in_file = std::fs::File::open(&in_files[0])?;
-            let tensor = content.tensor(&mut in_file, name, device)?;
-            let tensor = qmode.quantize(name, tensor, dtype)?;
-            Ok((name, tensor))
-        })
-        .collect::<Result<Vec<_>>>()?;
-    let qtensors = qtensors
-        .iter()
-        .map(|(k, v)| (k.as_str(), v))
-        .collect::<Vec<_>>();
-
-    let metadata = content
-        .metadata
-        .iter()
-        .map(|(k, v)| (k.as_str(), v))
-        .collect::<Vec<_>>();
-    gguf_file::write(&mut out_file, metadata.as_slice(), &qtensors)?;
-    Ok(())
-}
-
-
-// fn main() -> anyhow::Result<()> {
-//     let args = Args::parse();
-//     let device = Device::Cpu;
-//     match args.command {
-//         Command::Ls {
-//             files,
-//             format,
-//             verbose,
-//         } => {
-//             let multiple_files = files.len() > 1;
-//             for file in files.iter() {
-//                 if multiple_files {
-//                     println!("--- {file:?} ---");
-//                 }
-//                 run_ls(file, format.clone(), verbose, &device)?
-//             }
-//         }
-//         Command::Quantize {
-//             in_file,
-//             out_file,
-//             quantization,
-//             mode,
-//         } => run_quantize(&in_file, out_file, quantization, mode, &device)?,
-//         Command::Dequantize { in_file, out_file } => run_dequantize(in_file, out_file, &device)?,
-//     }
-//     Ok(())
-// }
 
 pub fn get_files_with_extension(dir: &std::path::Path, extension: &str) -> Vec<std::path::PathBuf> {
     let mut result = Vec::new();

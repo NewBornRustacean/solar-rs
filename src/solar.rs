@@ -1,13 +1,16 @@
+use std::io::Write;
 use std::path::Path;
 
-use candle_core::{DType, Device};
+use candle_core::{DType, Device, IndexOp};
+use candle_transformers::generation::LogitsProcessor;
 use candle_transformers::quantized_var_builder;
 use candle_transformers::models::quantized_llama2_c::QLlama;
 use candle_transformers::models::llama2_c::{Config, Cache};
 use tokenizers::Tokenizer;
 use serde::{Deserialize, Serialize};
-use anyhow::Result;
+use anyhow::{Result, Error};
 
+use crate::utils;
 
 // Define a struct to represent the configuration
 #[derive(Debug, Deserialize, Serialize)]
@@ -98,12 +101,12 @@ impl SolarConfig {
 /// # Errors
 ///
 /// This function will return an error if the model or the tokenizer could not be loaded from the given `model_path`.
-pub fn load_model(model_path: &str, quantized_model_name:&str, device: &Device) ->Result<(QLlama, Tokenizer)>{
+pub fn load_model(model_path: &str, quantized_model_name:&str, device: &Device) ->Result<(QLlama, Tokenizer, Cache)>{
     println!("--Start to load a quantized model..");
     let START_TIME = std::time::Instant::now();
 
     let tokenizer_path = Path::new(model_path).join("tokenizer.json");
-    let tokenizer = Tokenizer::from_file(tokenizer_path).map_err(anyhow::Error::msg);
+    let tokenizer = Tokenizer::from_file(tokenizer_path).map_err(anyhow::Error::msg)?;
 
     let quantized_model_path = Path::new(model_path).join(quantized_model_name);
     let qvb = quantized_var_builder::VarBuilder::from_gguf(quantized_model_path, &Device::Cpu)?;
@@ -115,25 +118,25 @@ pub fn load_model(model_path: &str, quantized_model_name:&str, device: &Device) 
 
     let solar_config = SolarConfig::default();
     let config = Config{
-        dim: solar_config.hidden_size, // transformer dimension
+        dim: dim, // transformer dimension
         hidden_dim: solar_config.intermediate_size, // for ffn layers
         n_layers: solar_config.num_hidden_layers, // number of layers
         n_heads: solar_config.num_attention_heads, // number of query heads
         n_kv_heads: solar_config.num_key_value_heads, // number of key/value heads (can be < query heads because of multiquery)
-        vocab_size: solar_config.vocab_size, // vocabulary size, usually 256 (byte-level)
+        vocab_size: _vocab_size, // vocabulary size, usually 256 (byte-level)
         seq_len: solar_config.max_position_embeddings, // max sequence length
         norm_eps: solar_config.rms_norm_eps,
     };
 
     let fake_vb = candle_nn::VarBuilder::zeros(DType::F32, &device);
-    let cache = Cache::new(true, &config, fake_vb)?;
-    let model = QLlama::load(qvb, &cache, config)?;
+    let cache = Cache::new(false, &config, fake_vb)?;
+    let model = QLlama::load(qvb, config)?;
 
     println!(
         "--model loaded in {:.3?} sec.",
         START_TIME.elapsed()
     );
-    Ok((model, tokenizer?))
+    Ok((model, tokenizer, cache))
 }
 
 
@@ -147,4 +150,79 @@ fn format_size(size_in_bytes: usize) -> String {
     } else {
         format!("{:.2}GB", size_in_bytes as f64 / 1e9)
     }
+}
+
+pub fn generate(prompt:String, tokenizer: Tokenizer, model:QLlama, max_seq_len:usize, cache: &mut Cache, device:
+&Device)->Result<()>{
+    let SEED:u64 =299792458;
+    let repeat_last_n:usize = 32;
+    let repeat_penalty:f32 = 1.2;
+    let temperature = 1.5;
+    let top_p = 0.95;
+    let mut logits_processor = LogitsProcessor::new(SEED,Some(temperature), Some(top_p));
+    let mut index_pos = 0;
+    let mut response: Vec<String> = vec![];
+
+    let mut tokenizer_stream = utils::TokenOutputStream::new(tokenizer.clone());
+
+    let mut tokens = tokenizer
+        .encode(prompt.clone(), true)
+        .map_err(|_| Error::msg("failed to parse tokens"))?
+        .get_ids()
+        .to_vec();
+
+    let eos_token =  match tokenizer_stream.get_token("<|im_end|>") {
+        Some(token) => token,
+        None => anyhow::bail!("cannot find the endoftext token"),
+    };
+
+    let start_gen = std::time::Instant::now();
+    for index in 0..max_seq_len {
+        let (context_size, context_index) = {
+                if index > 0 {
+                    (1, index_pos)
+                } else {
+                    (tokens.len(), 0)
+                }
+            };
+
+        let ctxt = &tokens[tokens.len().saturating_sub(context_size)..];
+        let input = candle_core::Tensor::new(ctxt, device)?.unsqueeze(0)?;
+        let logits = model.forward(&input, context_index, cache)?;
+        let logits = logits.i((0, logits.dim(1)? - 1))?;
+        let logits = if tokens.is_empty() {
+            logits
+        } else {
+            let start_at = tokens.len().saturating_sub(repeat_last_n);
+            candle_transformers::utils::apply_repeat_penalty(
+                &logits,
+                repeat_penalty,
+                &tokens[start_at..],
+            )?
+        };
+        index_pos += ctxt.len();
+
+        let next_token = logits_processor.sample(&logits)?;
+        tokens.push(next_token);
+
+        if next_token == eos_token {
+            break;
+        }
+
+        if let Some(t) = tokenizer_stream.next_token(next_token)? {
+            print!("{t}");
+            response.push(t);
+            std::io::stdout().flush()?;
+        }
+    }
+    if let Some(rest) = tokenizer_stream.decode_rest()? {
+        print!("{rest}");
+    }
+    let dt = start_gen.elapsed();
+    println!(
+        "\n{} tokens generated ({:.2} token/s)\n",
+        tokens.len(),
+        tokens.len() as f64 / dt.as_secs_f64(),
+    );
+    Ok(())
 }

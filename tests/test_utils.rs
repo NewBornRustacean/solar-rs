@@ -1,13 +1,14 @@
-use std::path::Path;
 use std::fs;
 use std::io::Write;
+use std::path::Path;
 
-use tempfile::tempdir;
-use candle_core::Device;
 use anyhow::Result;
+use candle_core::Device;
+use tempfile::tempdir;
 
-use solar_rs::utils::{safetensors_to_gguf, get_files_with_extension, display_tensors, QuantizationMode,
-                      Format, Quantization};
+use solar_rs::utils::{
+    display_tensors, get_files_with_extension, safetensors_to_gguf, Format, Quantization, QuantizationMode,
+};
 
 #[test]
 fn test_get_files_with_extension() {
@@ -17,8 +18,7 @@ fn test_get_files_with_extension() {
     // Create files with different extensions
     let file_names = ["file1.safetensors", "file2.txt", "file3.safetensors"];
     for &file_name in &file_names {
-        let mut file = fs::File::create(temp_dir.path().join(file_name))
-            .expect("Failed to create file");
+        let mut file = fs::File::create(temp_dir.path().join(file_name)).expect("Failed to create file");
         writeln!(file, "Test data").expect("Failed to write to file");
     }
 
@@ -41,19 +41,21 @@ fn test_get_files_with_extension() {
 #[test]
 #[ignore]
 #[cfg(not(feature = "exclude_from_ci"))]
-fn test_safetensors_to_gguf()->Result<()>{
+fn test_safetensors_to_gguf() -> Result<()> {
     let resource_path = Path::new("resources/DataVortexS-10.7B-dpo-v1.6");
     let in_files = get_files_with_extension(resource_path, "safetensors");
-    let out_file=resource_path.join("solar-datavortexs-10.7b-dpo-v1.6-quantized-q4_0.gguf");
+    let out_file = resource_path.join("solar-datavortexs-10.7b-dpo-v1.6-quantized-q4_0.gguf");
     safetensors_to_gguf(&in_files, out_file.to_path_buf(), Quantization::Q4_0)?;
     Ok(())
 }
 
 #[test]
 #[cfg(not(feature = "exclude_from_ci"))]
-fn test_display_tensors()->Result<()>{
-    let resource_path = Path::new("resources/DataVortexS-10.7B-dpo-v1.6/solar-datavortexs-10.7b-dpo-v1.6-quantized-q4_1\
-    .gguf");
+fn test_display_tensors() -> Result<()> {
+    let resource_path = Path::new(
+        "resources/DataVortexS-10.7B-dpo-v1.6/solar-datavortexs-10.7b-dpo-v1.6-quantized-q4_1\
+    .gguf",
+    );
     display_tensors(&resource_path.to_path_buf(), Option::from(Format::Gguf), true, &Device::Cpu);
     Ok(())
 }

@@ -1,4 +1,3 @@
-
 use candle_core::quantized::{gguf_file, GgmlDType, QTensor};
 use candle_core::{Device, Result};
 use clap::ValueEnum;
@@ -27,7 +26,7 @@ impl QuantizationMode {
                 } else {
                     Ok(tensor)
                 }
-            }
+            },
         }
     }
 }
@@ -89,18 +88,15 @@ pub enum Format {
 
 impl Format {
     pub fn infer<P: AsRef<std::path::Path>>(p: P) -> Option<Self> {
-        p.as_ref()
-         .extension()
-         .and_then(|e| e.to_str())
-         .and_then(|e| match e {
-             // We don't infer any format for .bin as it can be used for ggml/gguf or pytorch.
-             "safetensors" | "safetensor" => Some(Self::Safetensors),
-             "npz" => Some(Self::Npz),
-             "pth" | "pt" => Some(Self::Pth),
-             "ggml" => Some(Self::Ggml),
-             "gguf" => Some(Self::Gguf),
-             _ => None,
-         })
+        p.as_ref().extension().and_then(|e| e.to_str()).and_then(|e| match e {
+            // We don't infer any format for .bin as it can be used for ggml/gguf or pytorch.
+            "safetensors" | "safetensor" => Some(Self::Safetensors),
+            "npz" => Some(Self::Npz),
+            "pth" | "pt" => Some(Self::Pth),
+            "ggml" => Some(Self::Ggml),
+            "gguf" => Some(Self::Gguf),
+            _ => None,
+        })
     }
 }
 
@@ -115,11 +111,9 @@ pub fn display_tensors(
         None => match Format::infer(file) {
             Some(format) => format,
             None => {
-                println!(
-                    "{file:?}: cannot infer format from file extension, use the --format flag"
-                );
+                println!("{file:?}: cannot infer format from file extension, use the --format flag");
                 return Ok(());
-            }
+            },
         },
     };
     match format {
@@ -134,7 +128,7 @@ pub fn display_tensors(
                 };
                 println!("{name}: {shape_dtype}")
             }
-        }
+        },
         Format::Safetensors => {
             let tensors = unsafe { candle_core::safetensors::MmapedSafetensors::new(file)? };
             let mut tensors = tensors.tensors();
@@ -148,22 +142,17 @@ pub fn display_tensors(
                 let shape = view.shape();
                 println!("{name}: [{shape:?}; {dtype}]")
             }
-        }
+        },
         Format::Pth => {
             let mut tensors = candle_core::pickle::read_pth_tensor_info(file, verbose, None)?;
             tensors.sort_by(|a, b| a.name.cmp(&b.name));
             for tensor_info in tensors.iter() {
-                println!(
-                    "{}: [{:?}; {:?}]",
-                    tensor_info.name,
-                    tensor_info.layout.shape(),
-                    tensor_info.dtype,
-                );
+                println!("{}: [{:?}; {:?}]", tensor_info.name, tensor_info.layout.shape(), tensor_info.dtype,);
                 if verbose {
                     println!("    {:?}", tensor_info);
                 }
             }
-        }
+        },
 
         Format::Pickle => {
             let file = std::fs::File::open(file)?;
@@ -173,7 +162,7 @@ pub fn display_tensors(
             for (i, obj) in stack.stack().iter().enumerate() {
                 println!("{i} {obj:?}");
             }
-        }
+        },
         Format::Ggml => {
             let mut file = std::fs::File::open(file)?;
             let content = candle_core::quantized::ggml_file::Content::read(&mut file, device)?;
@@ -182,7 +171,7 @@ pub fn display_tensors(
             for (name, qtensor) in tensors.iter() {
                 println!("{name}: [{:?}; {:?}]", qtensor.shape(), qtensor.dtype());
             }
-        }
+        },
         Format::Gguf => {
             let mut file = std::fs::File::open(file)?;
             let content = gguf_file::Content::read(&mut file)?;
@@ -199,7 +188,7 @@ pub fn display_tensors(
             for (name, info) in tensors.iter() {
                 println!("{name}: [{:?}; {:?}]", info.shape, info.ggml_dtype);
             }
-        }
+        },
     }
     Ok(())
 }
@@ -233,21 +222,14 @@ pub fn safetensors_to_gguf(
             Ok((name, tensor))
         })
         .collect::<Result<Vec<_>>>()?;
-    let qtensors = qtensors
-        .iter()
-        .map(|(k, v)| (k.as_str(), v))
-        .collect::<Vec<_>>();
+    let qtensors = qtensors.iter().map(|(k, v)| (k.as_str(), v)).collect::<Vec<_>>();
 
     gguf_file::write(&mut out_file, &[], &qtensors)?;
 
     Ok(())
 }
 
-fn run_dequantize(
-    in_file: std::path::PathBuf,
-    out_file: std::path::PathBuf,
-    device: &Device,
-) -> Result<()> {
+fn run_dequantize(in_file: std::path::PathBuf, out_file: std::path::PathBuf, device: &Device) -> Result<()> {
     let mut in_file = std::fs::File::open(in_file)?;
     let content = gguf_file::Content::read(&mut in_file)?;
     let mut tensors = std::collections::HashMap::new();
@@ -259,7 +241,6 @@ fn run_dequantize(
     candle_core::safetensors::save(&tensors, out_file)?;
     Ok(())
 }
-
 
 pub fn get_files_with_extension(dir: &std::path::Path, extension: &str) -> Vec<std::path::PathBuf> {
     let mut result = Vec::new();

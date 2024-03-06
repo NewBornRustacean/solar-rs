@@ -101,11 +101,7 @@ impl SolarConfig {
 /// # Errors
 ///
 /// This function will return an error if the model or the tokenizer could not be loaded from the given `model_path`.
-pub fn load_model(
-    model_path: &str,
-    quantized_model_name: &str,
-    device: &Device,
-) -> Result<(QLlama, Tokenizer, Cache)> {
+pub fn load_model(model_path: &str, quantized_model_name: &str, device: &Device) -> Result<(QLlama, Tokenizer, Cache)> {
     println!("--Start to load a quantized model..");
     let START_TIME = std::time::Instant::now();
 
@@ -115,10 +111,7 @@ pub fn load_model(
     let quantized_model_path = Path::new(model_path).join(quantized_model_name);
     let qvb = quantized_var_builder::VarBuilder::from_gguf(quantized_model_path, &Device::Cpu)?;
 
-    let (_vocab_size, dim) = qvb
-        .get_no_shape("model.embed_tokens.weight")?
-        .shape()
-        .dims2()?;
+    let (_vocab_size, dim) = qvb.get_no_shape("model.embed_tokens.weight")?.shape().dims2()?;
 
     let solar_config = SolarConfig::default();
     let config = Config {
@@ -200,11 +193,7 @@ pub fn generate(
             logits
         } else {
             let start_at = tokens.len().saturating_sub(repeat_last_n);
-            candle_transformers::utils::apply_repeat_penalty(
-                &logits,
-                repeat_penalty,
-                &tokens[start_at..],
-            )?
+            candle_transformers::utils::apply_repeat_penalty(&logits, repeat_penalty, &tokens[start_at..])?
         };
         index_pos += ctxt.len();
 

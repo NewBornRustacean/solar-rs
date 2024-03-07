@@ -7,7 +7,7 @@ use solar_rs::solar;
 fn test_load_model_generate() -> Result<()> {
     let device = Device::Cpu;
     let model_path = "resources/DataVortexS-10.7B-dpo-v1.6";
-    let (model, tokenizer) =
+    let (model, tokenizer, _) =
         solar::load_model(model_path, "solar-datavortexs-10.7b-dpo-v1.6-quantized-q4_1.gguf", &device)?;
     // let max_seq_len:usize = 100;
     //

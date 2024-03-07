@@ -156,14 +156,13 @@ pub fn generate(
     let SEED: u64 = 299792458;
     let repeat_last_n: usize = 32;
     let repeat_penalty: f32 = 1.2;
-    let temperature = 1.5;
+    let temperature = 0.01;
     let top_p = 0.95;
     let mut logits_processor = LogitsProcessor::new(SEED, Some(temperature), Some(top_p));
     let mut index_pos = 0;
     let mut response: Vec<String> = vec![];
 
     let mut tokenizer_stream = utils::TokenOutputStream::new(tokenizer.clone());
-
     let mut tokens = tokenizer
         .encode(prompt.clone(), true)
         .map_err(|_| Error::msg("failed to parse tokens"))?

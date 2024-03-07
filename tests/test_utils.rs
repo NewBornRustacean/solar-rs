@@ -42,9 +42,9 @@ fn test_get_files_with_extension() {
 #[ignore]
 #[cfg(not(feature = "exclude_from_ci"))]
 fn test_safetensors_to_gguf() -> Result<()> {
-    let resource_path = Path::new("resources/DataVortexS-10.7B-dpo-v1.6");
+    let resource_path = Path::new("D:/models/DataVortexS-10.7B-dpo-v1.11");
     let in_files = get_files_with_extension(resource_path, "safetensors");
-    let out_file = resource_path.join("solar-datavortexs-10.7b-dpo-v1.6-quantized-q4_0.gguf");
+    let out_file = resource_path.join("solar-datavortexs-10.7b-dpo-v1.11-quantized-q4_0.gguf");
     safetensors_to_gguf(&in_files, out_file.to_path_buf(), Quantization::Q4_0)?;
     Ok(())
 }
@@ -53,8 +53,7 @@ fn test_safetensors_to_gguf() -> Result<()> {
 #[cfg(not(feature = "exclude_from_ci"))]
 fn test_display_tensors() -> Result<()> {
     let resource_path = Path::new(
-        "resources/DataVortexS-10.7B-dpo-v1.6/solar-datavortexs-10.7b-dpo-v1.6-quantized-q4_1\
-    .gguf",
+        "resources/DataVortexS-10.7B-dpo-v1.11/solar-datavortexs-10.7b-dpo-v1.11-quantized-q4_0.gguf",
     );
     display_tensors(&resource_path.to_path_buf(), Option::from(Format::Gguf), true, &Device::Cpu);
     Ok(())

@@ -6,3 +6,4 @@ resources/DataVortexS-10.7B-dpo-v1.6/config.json filter=lfs diff=lfs merge=lfs -
 resources/DataVortexS-10.7B-dpo-v1.6/generation_config.json filter=lfs diff=lfs merge=lfs -text
 resources/DataVortexS-10.7B-dpo-v1.6/model.safetensors.index.json filter=lfs diff=lfs merge=lfs -text
 resources/DataVortexS-10.7B-dpo-v1.6/solar-datavortexs-10.7b-dpo-v1.6-quantized-q4_1.gguf filter=lfs diff=lfs merge=lfs -text
+resources/DataVortexS-10.7B-dpo-v1.11 filter=lfs diff=lfs merge=lfs -text
